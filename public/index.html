@@ -1,1 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Network Traffic Analyzer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-bottom: 20px;
+    }
+    .card {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .traffic-list {
+      height: 300px;
+      overflow-y: auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .traffic-item {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+    }
+    .traffic-item:last-child {
+      border-bottom: none;
+    }
+    canvas {
+      width: 100% !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Network Traffic Analyzer</h1>
+    
+    <div class="dashboard">
+      <div class="card">
+        <h2>Traffic Overview</h2>
+        <canvas id="trafficChart"></canvas>
+      </div>
+      <div class="card">
+        <h2>Request Methods</h2>
+        <canvas id="methodsChart"></canvas>
+      </div>
+    </div>
 
+    <div class="traffic-list" id="trafficList">
+      <!-- Real-time traffic will appear here -->
+    </div>
+  </div>
+
+  <script>
+    const ws = new WebSocket(`ws://${window.location.host}`);
+    const trafficList = document.getElementById('trafficList');
+    let trafficChart, methodsChart;
+    let trafficData = [];
+    
+    // Initialize charts
+    function initCharts() {
+      const trafficCtx = document.getElementById('trafficChart').getContext('2d');
+      const methodsCtx = document.getElementById('methodsChart').getContext('2d');
+
+      trafficChart = new Chart(trafficCtx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Requests per minute',
+            data: [],
+            borderColor: 'rgb(75, 192, 192)',
+            tension: 0.1
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              beginAtZero: true
+            }
+          }
+        }
+      });
+
+      methodsChart = new Chart(methodsCtx, {
+        type: 'doughnut',
+        data: {
+          labels: [],
+          datasets: [{
+            data: [],
+            backgroundColor: [
+              'rgb(255, 99, 132)',
+              'rgb(54, 162, 235)',
+              'rgb(255, 206, 86)',
+              'rgb(75, 192, 192)'
+            ]
+          }]
+        }
+      });
+    }
+
+    // Update charts with new data
+    function updateCharts() {
+      // Update traffic chart
+      const lastMinute = new Date(Date.now() - 60000);
+      const recentTraffic = trafficData.filter(t => new Date(t.timestamp) > lastMinute);
+      
+      trafficChart.data.labels = recentTraffic.map(t => 
+        new Date(t.timestamp).toLocaleTimeString()
+      );
+      trafficChart.data.datasets[0].data = recentTraffic.map((_, i) => i + 1);
+      trafficChart.update();
+
+      // Update methods chart
+      const methods = {};
+      trafficData.forEach(t => {
+        methods[t.method] = (methods[t.method] || 0) + 1;
+      });
+
+      methodsChart.data.labels = Object.keys(methods);
+      methodsChart.data.datasets[0].data = Object.values(methods);
+      methodsChart.update();
+    }
+
+    // Handle incoming WebSocket messages
+    ws.onmessage = (event) => {
+      const traffic = JSON.parse(event.data);
+      trafficData.push(traffic);
+      
+      // Keep only last 100 items for display
+      if (trafficData.length > 100) {
+        trafficData.shift();
+      }
+
+      // Add to traffic list
+      const item = document.createElement('div');
+      item.className = 'traffic-item';
+      item.innerHTML = `
+        ${new Date(traffic.timestamp).toLocaleTimeString()} - 
+        ${traffic.method} ${traffic.path} 
+        (${traffic.size} bytes)
+      `;
+      trafficList.insertBefore(item, trafficList.firstChild);
+
+      // Update charts
+      updateCharts();
+    };
+
+    // Initialize on load
+    window.onload = () => {
+      initCharts();
+      
+      // Fetch existing traffic data
+      fetch('/api/traffic')
+        .then(res => res.json())
+        .then(data => {
+          trafficData = data;
+          updateCharts();
+        });
+    };
+  </script>
+</body>
+</html>
